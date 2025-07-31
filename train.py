@@ -2,45 +2,14 @@ from datasets import load_dataset
 from trl import GRPOConfig, GRPOTrainer
 import re
 import pandas as pd
+from peft import LoraConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 
 dataset = load_dataset("predibase/wordle-grpo", split="train")
 words = pd.read_csv("https://raw.githubusercontent.com/arnavgarg1/arnavgarg1/refs/heads/main/five_letter_words.csv")
+valid_words = set(words["Word"].str.lower())
 
-#print(dataset)
-
-"""
-# Example prompt
-prompts = [[
-    {"role": "system", "content": "You are playing Wordle..."},
-    {"role": "user", "content": "Here is some previous feedback:\nGuess 1: CRANE → x x x - x"}
-]]
-
-
-# Example model output (assistant completion)
-completions = [
-    [
-        {"role": "assistant", "content": "<think>Let's try based on feedback</think>\n<guess>ROBIN</guess>"}
-    ],
-    [
-        {"role": "assistant", "content": "<think>The letter 'I' seems useful here</think>\n<guess>CLEAN</guess>"}
-    ],
-    [
-        {"role": "assistant", "content": "<think>Guessing a word with known letters in new positions</think>\n<guess>BRAIN</guess>"}
-    ],
-    [
-        {"role": "assistant", "content": "<think>Trying a different vowel structure</think>\n<guess>QUILT</guess>"}
-    ]
-]
-
-
-
-# Ground truth answer
-answers = ["CLEAN"]
-history = [
-    ("BLAST", "B(x) L(✓) A(-) S(x) T(x)"),
-    ("CLAMP", "C(✓) L(✓) A(-) M(x) P(x)")
-]
-"""
 
 # helper functions
 def regexsearch(text)->str:
@@ -91,7 +60,7 @@ def validword(completions, **kwargs) -> list[float]:
     for g in guesses:
         penalty = 0.0
         penalty += 0.5 if len(g) != 5 else 0.0
-        penalty += 0.5 if guess not in words else 0.0
+        penalty += 0.5 if g not in valid_words else 0.0
         reward = max(0.0, 1.0-penalty)
         rewards.append(reward)
     return rewards
@@ -105,12 +74,39 @@ def xmlformat(completions, **kwargs) -> list[float]:
     return [1.0 if re.match(pattern, text.strip(), flags=re.DOTALL) else 0.0 for text in contents]
 
 
-reward_funcs = [finalguess, feedback_reward, validword, xmlformat]
+
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 
 
-training_args = GRPOConfig(output_dir="Qwen2.5-1.5B-GRPO")
+training_args = GRPOConfig(output_dir="Qwen2.5-1.5B-GRPO",
+                           use_vllm=True,
+                           num_generations=4,
+                           log_completions=True,
+                           num_completions_to_print=2,
+                           learning_rate=5e-6,
+                           format="chat"
+                           )
+
+peft_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM",
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.bfloat16,
+    attn_implementation="flash_attention_2",
+    peft_config=peft_config,
+    device_map=None
+).to("cuda")
+
+
+
 trainer = GRPOTrainer(
-        model="Qwen/Qwen2.5-1.5B-Instruct",
+        model=model,
         reward_funcs=[
             finalguess,
             feedback_reward,
