@@ -1,3 +1,5 @@
 # macOS system files
 .DS_Store
 
+wandb/
+Qwen2.5-1.5B-GRPO/
