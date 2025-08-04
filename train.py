@@ -17,7 +17,7 @@ def regexsearch(text)->str:
     return match.group(1).strip().lower() if match else ""
 
 
-def extractguess(completions)->str:
+def extractguess(completions)->list[str]:
     response = [c[0]["content"] for c in completions]
     guesses = [regexsearch(r) for r in response]
     return guesses
