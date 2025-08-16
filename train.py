@@ -34,15 +34,39 @@ valid_words = set(words["Word"].str.lower())
 
 # helper functions
 def regexsearch(text)->str:
+    """
+    Extracts a single word enclosed in <guess>...</guess> tags.
+
+    Matches only one contiguous word (letters, digits, or underscores),
+    ignoring surrounding spaces, and returns it in lowercase.
+    If the tags contain multiple words or no match is found, returns "".
+    """
     match = re.search(r"<guess>\s*(\w+)\s*</guess>", text)
     return match.group(1).strip().lower() if match else ""
 
 def extractguess(completions)->list[str]:
+    """Extracts guesses from a list of completion texts.
+    For each string in `completions`, applies `regexsearch` to retrieve 
+    the word inside <guess>...</guess> tags. Returns a list of guesses 
+    (lowercased words), or empty strings where no match is found."""
     guesses = [regexsearch(completion) for completion in completions]
     return guesses
 
 # reward functions
 def finalguess(completions, secret, **kwargs) -> list[float]:
+    """
+    Compares extracted guesses against the secret word and assigns rewards.
+
+    Each completion is processed with `extractguess` to get a guess. 
+    If a guess matches the secret (case-insensitive, trimmed), it 
+    receives a reward of 2.0; otherwise 0.0. Returns a list of rewards 
+    aligned with the input completions.
+
+    Note:
+        The commented code shows an alternative version where `secret` 
+        could be a sequence of answers; in that case, each guess would be 
+        compared against the corresponding target in the sequence.
+    """
     guesses = extractguess(completions)
     # answer = secret.strip().lower()
     answers = [t.strip().lower() for t in secret] * len(completions)
@@ -51,6 +75,26 @@ def finalguess(completions, secret, **kwargs) -> list[float]:
     return reward
 
 def feedback_reward(completions, past_guess_history, **kwargs) -> list[float]:
+    """
+    Compute rewards for guesses based on consistency with past feedback.
+
+    Each guess starts with a reward of 1.0 and a penalty of 0.0. The penalty
+    accumulates by checking the guess against *all past feedback entries*:
+      - +0.1 if a letter is marked 'x' but appears in the guess.
+      - +0.1 if a letter is marked '-' but missing from the guess.
+      - +0.1 if a letter is marked '-' but appears in the same position.
+      - +0.2 if a letter is marked '✓' but missing or misplaced.
+
+    The final reward is: max(0.0, 1.0 - penalty).
+
+    Args:
+        completions (list[str]): Model outputs with guesses inside <guess>...</guess>.
+        past_guess_history (list[str]): Stringified Python lists of (word, feedback) pairs.
+        **kwargs: Extra arguments (unused).
+
+    Returns:
+        list[float]: Rewards for each completion.
+    """
     rewards = []
     guesses = extractguess(completions)
     
@@ -92,6 +136,22 @@ def feedback_reward(completions, past_guess_history, **kwargs) -> list[float]:
     return rewards
 
 def validword(completions, **kwargs) -> list[float]:
+    """
+    Rewards guesses that are valid 5-letter words.
+
+    Each completion is processed with `extractguess` to get a guess.
+    A guess earns:
+      - 1.0 if it is exactly 5 letters long and appears in `valid_words`.
+      - 0.5 if it satisfies only one of the two conditions.
+      - 0.0 if it fails both conditions.
+
+    Args:
+        completions (list[str]): Model output strings.
+        **kwargs: Unused additional arguments for compatibility.
+
+    Returns:
+        list[float]: Rewards for each completion, aligned with input order.
+    """
     guesses = extractguess(completions)
     rewards = []
     for g in guesses:
@@ -103,6 +163,17 @@ def validword(completions, **kwargs) -> list[float]:
     return rewards
 
 def xmlformat(completions, **kwargs) -> list[float]:
+    """
+    Rewards completions that follow the required XML-like structure.
+
+    A completion receives a reward of 1.0 if it contains both:
+        <think> ... </think>
+        <guess> ... </guess>
+    (in that order, with optional whitespace in between).
+    
+    Otherwise, the reward is 0.0. Returns a list of rewards aligned 
+    with the input completions.
+    """
     pattern = r"<think>.*?</think>\s*<guess>.*?</guess>"
     rewards = []
     
