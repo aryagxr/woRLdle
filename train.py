@@ -13,7 +13,7 @@ model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
+    # attn_implementation="flash_attention_2",
     device_map="auto"
 ).to("cuda")
 
@@ -50,46 +50,110 @@ def finalguess(completions, secret, **kwargs) -> list[float]:
     # reward = [2.0 if g == answer else 0.0 for g in guesses]
     return reward
 
+# def feedback_reward(completions, past_guess_history, **kwargs) -> list[float]:
+#     rewards = []
+#     guesses = extractguess(completions)
+    
+#     for i, g in enumerate(guesses):
+#         penalty = 0.0
+        
+#         history_str = past_guess_history[i] if i < len(past_guess_history) else "[]"
+        
+#         try:
+#             import ast
+#             history_list = ast.literal_eval(history_str)
+            
+#             for word, feedback in history_list:
+#                 parsed = re.findall(r"([A-Z])\((.)\)", feedback)
+                
+#                 for pos, (letter, status) in enumerate(parsed):
+#                     letter = letter.lower()
+                    
+#                     if status == "x":
+#                         if letter in g:
+#                             penalty += 0.1
+                    
+#                     elif status == "-":
+#                         if letter not in g:
+#                             penalty += 0.1
+#                         elif pos < len(g) and g[pos] == letter:
+#                             penalty += 0.1
+                    
+#                     elif status == "✓":
+#                         if pos >= len(g) or g[pos] != letter:
+#                             penalty += 0.2
+            
+#         except Exception as e:
+#             penalty = 0.0
+        
+#         reward = max(0.0, 1.0 - penalty)
+#         rewards.append(reward)
+    
+#     return rewards
+
+
+
 def feedback_reward(completions, past_guess_history, **kwargs) -> list[float]:
     rewards = []
     guesses = extractguess(completions)
-    
+
+    print("\n=== DEBUG: feedback_reward called ===")
+    print(f"Completions: {completions}")
+    print(f"Extracted guesses: {guesses}")
+    print(f"Past guess history: {past_guess_history}")
+
     for i, g in enumerate(guesses):
+        if not g or g.strip() == "":
+            rewards.append(0.0)
+            continue
         penalty = 0.0
-        
+        print(f"\n-- Guess {i}: '{g}' --")
+
         history_str = past_guess_history[i] if i < len(past_guess_history) else "[]"
-        
+        print(f"History string: {history_str}")
+
         try:
-            import ast
+            import ast, re
             history_list = ast.literal_eval(history_str)
-            
+            print(f"Parsed history list: {history_list}")
+
             for word, feedback in history_list:
+                print(f"  Comparing to past guess '{word}' with feedback '{feedback}'")
                 parsed = re.findall(r"([A-Z])\((.)\)", feedback)
-                
+                print(f"  Parsed feedback tokens: {parsed}")
+
                 for pos, (letter, status) in enumerate(parsed):
                     letter = letter.lower()
-                    
+
                     if status == "x":
                         if letter in g:
                             penalty += 0.1
-                    
+                            print(f"    PENALTY +0.1: '{letter}' should not be in guess")
+
                     elif status == "-":
                         if letter not in g:
                             penalty += 0.1
+                            print(f"    PENALTY +0.1: '{letter}' missing from guess")
                         elif pos < len(g) and g[pos] == letter:
                             penalty += 0.1
-                    
+                            print(f"    PENALTY +0.1: '{letter}' in wrong position")
+
                     elif status == "✓":
                         if pos >= len(g) or g[pos] != letter:
                             penalty += 0.2
-            
+                            print(f"    PENALTY +0.2: '{letter}' not correct at position {pos}")
+
         except Exception as e:
+            print(f"  ERROR parsing history: {e}")
             penalty = 0.0
-        
+
         reward = max(0.0, 1.0 - penalty)
+        print(f"Final penalty: {penalty} → Reward: {reward}")
         rewards.append(reward)
-    
+
+    print(f"=== DEBUG RESULT: {rewards} ===\n")
     return rewards
+
 
 def validword(completions, **kwargs) -> list[float]:
     guesses = extractguess(completions)
@@ -114,24 +178,26 @@ def xmlformat(completions, **kwargs) -> list[float]:
     return rewards
 
 training_args = GRPOConfig(output_dir="Qwen2.5-1.5B-GRPO",
-                           num_generations=8,
+                           num_generations=4,
                            log_completions=True,
                            num_completions_to_print=4,
-                           learning_rate=5e-6,
+                           logging_steps=1,
+                           disable_tqdm=False,
+                           learning_rate=1e-6,
                            temperature=0.8,
                            top_p=0.9,
                            top_k=50,
-                           gradient_accumulation_steps=8,
-                           per_device_train_batch_size=1,
+                           gradient_accumulation_steps=1,
+                           per_device_train_batch_size=4,
                            report_to="wandb",
                            run_name="wordle-grpo",
-                           max_grad_norm=0.1,
+                        #    max_grad_norm=0.1,
                            bf16=True,
                            num_train_epochs=5,
-                           weight_decay = 0.1,
+                        #    weight_decay = 0.1,
                            save_steps=19,
-                           adam_beta1 = 0.9,
-                           adam_beta2 = 0.99,
+                        #    adam_beta1 = 0.9,
+                        #    adam_beta2 = 0.99,
                            )
 
 trainer = GRPOTrainer(
